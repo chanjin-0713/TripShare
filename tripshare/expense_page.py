@@ -103,9 +103,10 @@ class ExpensePage(tk.Frame):
         top.pack(fill="x", pady=(16, 6))
         self.count_label = tk.Label(top, bg=C_BG, fg=C_TEXT, font=(FONT, 11, "bold"))
         self.count_label.pack(side="left")
-        link(top, "선택 삭제", self.on_delete, fg=C_RED).pack(side="right")
-        tk.Label(top, text="·", bg=C_BG, fg=C_MUTED).pack(side="right", padx=6)
-        link(top, "선택 수정", self.on_edit).pack(side="right")
+        ttk.Button(top, text="삭제", style="Danger.TButton", command=self.on_delete).pack(side="right")
+        ttk.Button(top, text="수정", style="Soft.TButton", command=self.on_edit).pack(side="right", padx=(0, 8))
+        tk.Label(top, text="목록에서 지출을 선택한 뒤 누르세요", bg=C_BG, fg=C_MUTED, font=(FONT, 9)).pack(
+            side="right", padx=12)
 
         wrap = card(self)
         wrap.pack(fill="both", expand=True)
