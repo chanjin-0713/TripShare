@@ -4,13 +4,15 @@
 """
 from __future__ import annotations
 
+import os
 import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox, simpledialog, ttk
 
+from . import storage
 from .models import (
     MAX_NAME_LEN, MAX_PARTICIPANTS, MIN_PARTICIPANTS, Trip, ValidationError,
-    default_data_path, demo_trip, load_trip, save_trip,
+    default_data_path, demo_trip, save_trip,
 )
 
 APP_TITLE = "TripShare - 여행 경비 자동 정산"
@@ -34,7 +36,9 @@ class TripShareApp:
     def __init__(self, root: tk.Tk, data_path: Path | None = None) -> None:
         self.root = root
         self.data_path = Path(data_path) if data_path else default_data_path()
-        self.trip = self._load_initial()
+        self._save_error_shown = False
+        self.startup = storage.startup_load(self.data_path)
+        self.trip = self.startup.trip or Trip()
 
         ui.set_scale(max(1.0, root.winfo_fpixels("1i") / 96))
         SCALE = ui.SCALE
@@ -45,26 +49,61 @@ class TripShareApp:
         self._setup_style()
         self._build_ui()
         self.refresh()
+        root.protocol("WM_DELETE_WINDOW", self.on_close)
+        self._report_startup()
 
     # ---------- 저장/불러오기 ----------
-    def _load_initial(self) -> Trip:
-        try:
-            return load_trip(self.data_path)
-        except FileNotFoundError:
-            return demo_trip()
-        except (ValidationError, OSError, UnicodeDecodeError):
-            # 손상된 파일은 보존해 두고 예시 데이터로 시작
-            try:
-                self.data_path.replace(self.data_path.with_suffix(".bak"))
-            except OSError:
-                pass
-            return demo_trip()
+    def _report_startup(self) -> None:
+        """시작할 때 저장 파일 상태를 사용자에게 알린다. 프로그램은 어떤 경우에도 종료되지 않는다."""
+        res = self.startup
+        if res.status == storage.RECOVERED:
+            messagebox.showwarning("저장 파일 복구", res.message, parent=self.root)
+        elif res.status == storage.CORRUPT:
+            new_trip = messagebox.askyesno(
+                "저장 파일 오류",
+                f"저장된 여행 데이터를 불러오지 못했습니다.\n\n{res.message}\n\n"
+                "새 여행을 만들까요?\n(예: 새 여행 만들기 / 아니오: 예시 데이터로 시작)",
+                icon="error", parent=self.root)
+            self.trip = Trip() if new_trip else demo_trip()
+            self._autosave()
+            self.refresh()
+            if new_trip:
+                self.name_entry.focus_set()
+        elif res.status == storage.NEW:
+            self._autosave()  # 첫 실행: 예시 데이터를 바로 저장해 저장 위치를 만들어 둔다
+            self.set_status("처음 실행하셨네요! 가상 예시 데이터로 시작합니다. '새 여행 시작'으로 직접 만들 수 있어요.",
+                            C_AMBER, C_AMBER_BG)
 
-    def _autosave(self) -> None:
+    def _autosave(self, show_error: bool = True) -> bool:
+        """저장 성공 여부를 반환한다. 실패해도 프로그램은 계속 동작하며, 오류 창은 성공할 때까지 한 번만 띄운다."""
         try:
             save_trip(self.trip, self.data_path)
         except OSError as exc:
-            messagebox.showerror("저장 실패", f"데이터를 저장하지 못했습니다.\n{exc}", parent=self.root)
+            if show_error and not self._save_error_shown:
+                self._save_error_shown = True
+                messagebox.showerror(
+                    "저장 실패",
+                    f"데이터를 자동 저장하지 못했습니다.\n저장 위치: {self.data_path}\n{exc}\n\n"
+                    "프로그램은 계속 사용할 수 있지만, 종료하면 변경 내용이 사라질 수 있습니다.",
+                    parent=self.root)
+            return False
+        self._save_error_shown = False
+        return True
+
+    def on_close(self) -> None:
+        if not self._autosave(show_error=False):
+            if not messagebox.askyesno("저장 실패", "데이터를 저장하지 못했습니다.\n저장하지 않고 종료할까요?",
+                                       icon="warning", parent=self.root):
+                return
+        self.root.destroy()
+
+    def open_data_folder(self) -> None:
+        try:
+            self.data_path.parent.mkdir(parents=True, exist_ok=True)
+            os.startfile(self.data_path.parent)  # Windows 전용
+        except (OSError, AttributeError) as exc:
+            messagebox.showinfo("저장 폴더", f"저장 위치:\n{self.data_path.parent}\n\n(폴더를 열지 못했습니다: {exc})",
+                                parent=self.root)
 
     # ---------- UI 구성 ----------
     def _setup_style(self) -> None:
@@ -152,11 +191,12 @@ class TripShareApp:
 
         bottom = tk.Frame(side, bg=C_SIDEBAR, padx=18, pady=16)
         bottom.pack(side="bottom", fill="x")
-        for text, cmd in (("새 여행 시작", self.on_new_trip), ("예시 데이터 불러오기", self.on_load_demo)):
+        for text, cmd in (("새 여행 시작", self.on_new_trip), ("예시 데이터 불러오기", self.on_load_demo),
+                          ("저장 폴더 열기", self.open_data_folder)):
             lbl = _link(bottom, text, cmd)
             lbl.configure(bg=C_SIDEBAR, font=(FONT, 10))
             lbl.pack(anchor="w", pady=3)
-        tk.Label(bottom, text="인터넷 연결 없이 동작합니다", bg=C_SIDEBAR, fg=C_MUTED,
+        tk.Label(bottom, text="변경 사항은 자동 저장됩니다\n인터넷 연결 없이 동작합니다", bg=C_SIDEBAR, fg=C_MUTED, justify="left",
                  font=(FONT, 8)).pack(anchor="w", pady=(10, 0))
 
     def _build_header(self, parent: tk.Frame) -> None:
