@@ -19,6 +19,8 @@ PRIVACY_NOTE = "실제 이름·연락처 등 개인정보는 입력하지 마세
 from . import ui
 from .expense_page import ExpensePage
 from .result_page import ResultPage
+from .budget_page import BudgetPage
+from .budget import evaluate
 from .ui import (
     AVATAR_COLORS, C_ACCENT, C_ACCENT_SOFT, C_AMBER, C_AMBER_BG, C_BG, C_BORDER, C_GREEN, C_GREEN_BG,
     C_MUTED, C_RED, C_SIDEBAR, C_TEXT, FONT, GRID_COLUMNS, avatar as _avatar, card as _card,
@@ -90,8 +92,10 @@ class TripShareApp:
         self._build_info_card(main)
         self._build_participants(main)
         self.expense_page = ExpensePage(self.content, self)
+        self.budget_page = BudgetPage(self.content, self)
         self.result_page = ResultPage(self.content, self)
-        self.pages = {"settings": self.settings_page, "expenses": self.expense_page, "result": self.result_page}
+        self.pages = {"settings": self.settings_page, "expenses": self.expense_page,
+                      "budget": self.budget_page, "result": self.result_page}
         self.current_page = ""
         self.show_page("settings")
 
@@ -108,6 +112,8 @@ class TripShareApp:
                           font=(FONT, 10, "bold" if active else "normal"))
         if key == "expenses":
             self.expense_page.refresh()
+        elif key == "budget":
+            self.budget_page.refresh()
         elif key == "result":
             self.result_page.refresh()
 
@@ -136,6 +142,7 @@ class TripShareApp:
 
         nav("settings", "여행 설정")
         nav("expenses", "지출 내역")
+        nav("budget", "예산 관리")
         nav("result", "정산 결과")
 
         bottom = tk.Frame(side, bg=C_SIDEBAR, padx=18, pady=16)
@@ -220,6 +227,14 @@ class TripShareApp:
         self.refresh_participants()
         if hasattr(self, "expense_page"):
             self.expense_page.refresh(reset_form=True)
+            self.budget_page.refresh()
+
+    def on_budget_changed(self) -> None:
+        """예산 관리 화면에서 예산을 바꿨을 때, 입력 중인 다른 화면의 내용은 건드리지 않고 갱신."""
+        self.budget_var.set(f"{self.trip.budget:,}")
+        self.refresh_header()
+        self.expense_page.refresh()
+        self.budget_page.refresh()
 
     def refresh_header(self) -> None:
         for w in self.header_avatar_holder.winfo_children():
@@ -230,7 +245,9 @@ class TripShareApp:
         self.header_members.configure(text=members or "아직 등록된 참가자가 없습니다")
         for w in self.chip_row.winfo_children():
             w.destroy()
-        _chip(self.chip_row, f"예산 {self.trip.budget:,}원", C_ACCENT, C_ACCENT_SOFT).pack(side="left")
+        st = evaluate(self.trip.budget, self.trip.total_spent)
+        text = "예산 미설정" if st.is_unset else f"예산 {st.budget:,}원 ({st.percent_text} 사용)"
+        _chip(self.chip_row, text, C_ACCENT, C_ACCENT_SOFT).pack(side="left")
         _chip(self.chip_row, f"참가자 {len(self.trip.participants)}/{MAX_PARTICIPANTS}명",
               C_GREEN, C_GREEN_BG).pack(side="left", padx=6)
 

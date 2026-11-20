@@ -5,9 +5,10 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 
 from . import ui
+from .budget import CAUTION, OK, OVER, evaluate
 from .models import CATEGORIES, DEFAULT_CATEGORY, MIN_PARTICIPANTS, ValidationError
 from .ui import (
-    C_ACCENT, C_ACCENT_SOFT, C_AMBER, C_BG, C_BORDER, C_GREEN, C_GREEN_BG, C_MUTED, C_RED,
+    C_ACCENT, C_ACCENT_SOFT, C_AMBER, C_AMBER_BG, C_BG, C_BORDER, C_GREEN, C_GREEN_BG, C_MUTED, C_RED,
     C_RED_BG, C_TEXT, FONT, card, chip, link,
 )
 
@@ -160,20 +161,18 @@ class ExpensePage(tk.Frame):
             self.tree.see(str(select))
 
     def _refresh_summary(self) -> None:
-        total, budget = self.trip.total_spent, self.trip.budget
-        self.total_label.configure(text=f"총 지출 {total:,}원")
+        st = evaluate(self.trip.budget, self.trip.total_spent)
+        self.total_label.configure(text=f"총 지출 {st.spent:,}원")
         for w in self.chip_row.winfo_children():
             w.destroy()
         chip(self.chip_row, f"{len(self.trip.expenses)}건", C_ACCENT, C_ACCENT_SOFT).pack(side="left")
-        if budget > 0:
-            diff = budget - total
-            text = f"예산 {diff:,}원 남음" if diff >= 0 else f"예산 {-diff:,}원 초과"
-            fg, bg = (C_GREEN, C_GREEN_BG) if diff >= 0 else (C_RED, C_RED_BG)
-            chip(self.chip_row, text, fg, bg).pack(side="left", padx=6)
-            chip(self.chip_row, f"예산 {budget:,}원의 {total * 100 // budget}% 사용", C_MUTED, "#f3f4f6")\
-                .pack(side="left")
-        else:
-            chip(self.chip_row, "예산 미설정", C_AMBER, "#fef3c7").pack(side="left", padx=6)
+        if st.is_unset:
+            chip(self.chip_row, "예산 미설정", C_AMBER, C_AMBER_BG).pack(side="left", padx=6)
+            return
+        text = f"예산 {st.over_amount:,}원 초과" if st.level == OVER else f"예산 {st.remaining:,}원 남음"
+        fg, bg = {OK: (C_GREEN, C_GREEN_BG), CAUTION: (C_AMBER, C_AMBER_BG), OVER: (C_RED, C_RED_BG)}[st.level]
+        chip(self.chip_row, text, fg, bg).pack(side="left", padx=6)
+        chip(self.chip_row, f"예산 {st.budget:,}원의 {st.percent_text} 사용", C_MUTED, "#f3f4f6").pack(side="left")
 
     # ---------- 동작 ----------
     def _selected_index(self) -> int | None:
@@ -201,6 +200,7 @@ class ExpensePage(tk.Frame):
             messagebox.showwarning("지출 등록", f"먼저 '여행 설정'에서 참가자를 최소 {MIN_PARTICIPANTS}명 등록해 주세요.",
                                    parent=self.app.root)
             return
+        before = evaluate(self.trip.budget, self.trip.total_spent).level
         args = (self.title_var.get(), self.amount_var.get(), self.payer_var.get(), self.category_var.get())
         try:
             if self.editing is None:
@@ -217,6 +217,18 @@ class ExpensePage(tk.Frame):
         self._refresh_list(select=index)
         self._refresh_summary()
         self.title_entry.focus_set()
+        self._warn_if_worse(before)
+
+    def _warn_if_worse(self, before: str) -> None:
+        """등록/수정으로 예산 상태가 '주의'나 '초과'로 새로 바뀌면 한 번 알려 준다."""
+        st = evaluate(self.trip.budget, self.trip.total_spent)
+        rank = {"unset": 0, "ok": 0, "caution": 1, "over": 2}
+        if rank[st.level] <= rank[before]:
+            return  # 상태가 나빠진 경우에만 알린다
+        if st.level == OVER:
+            messagebox.showwarning("예산 초과 경고", st.message, parent=self.app.root)
+        elif st.level == CAUTION:
+            messagebox.showinfo("예산 주의", st.message, parent=self.app.root)
 
     def on_edit(self) -> None:
         index = self._selected_index()
