@@ -11,6 +11,11 @@ class PayerStat:
     name: str
     amount: int       # 실제 결제한 금액
     count: int        # 결제 건수
+    share_tenths: int = 0  # 전체 지출 대비 비중(%)의 10배
+
+    @property
+    def share_text(self) -> str:
+        return f"{self.share_tenths / 10:.1f}%"
 
 
 @dataclass(frozen=True)
@@ -59,5 +64,6 @@ def compute(trip: Trip) -> Statistics:
 
     shares = _shares_tenths([cat_amount[c] for c in CATEGORIES])
     categories = [CategoryStat(c, cat_amount[c], cat_count[c], shares[i]) for i, c in enumerate(CATEGORIES)]
-    payers = [PayerStat(n, a, k) for n, (a, k) in paid.items()]
+    payer_shares = _shares_tenths([a for a, _k in paid.values()])
+    payers = [PayerStat(n, a, k, payer_shares[i]) for i, (n, (a, k)) in enumerate(paid.items())]
     return Statistics(sum(e.amount for e in trip.expenses), len(trip.expenses), payers, categories)

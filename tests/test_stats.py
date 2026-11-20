@@ -23,6 +23,7 @@ class StatsTests(unittest.TestCase):
         self.assertEqual((s.total, s.expense_count), (300000, 3))
         self.assertEqual([(p.name, p.amount, p.count) for p in s.payers],
                          [("가", 180000, 1), ("나", 90000, 1), ("다", 30000, 1)])
+        self.assertEqual([p.share_text for p in s.payers], ["60.0%", "30.0%", "10.0%"])
         by = {c.category: c for c in s.categories}
         self.assertEqual((by["숙박비"].amount, by["숙박비"].share_text), (180000, "60.0%"))
         self.assertEqual((by["식비"].amount, by["식비"].share_text), (90000, "30.0%"))
@@ -49,6 +50,7 @@ class StatsTests(unittest.TestCase):
                             for i in range(rnd.randint(1, 12))])
             s = compute(t)
             self.assertEqual(sum(c.share_tenths for c in s.categories), 1000)
+            self.assertEqual(sum(p.share_tenths for p in s.payers), 1000)
             self.assertEqual(sum(c.amount for c in s.categories), s.total)
             self.assertEqual(sum(p.amount for p in s.payers), s.total)
 
