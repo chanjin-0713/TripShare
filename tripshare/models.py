@@ -14,7 +14,11 @@ MAX_PARTICIPANTS = 10
 MAX_NAME_LEN = 12          # 참가자 이름 최대 길이
 MAX_TRIP_NAME_LEN = 30     # 여행 이름 최대 길이
 MAX_BUDGET = 10_000_000_000  # 100억 원
-SCHEMA_VERSION = 1
+MAX_EXPENSE_TITLE_LEN = 30
+MAX_EXPENSE_AMOUNT = 10_000_000_000  # 100억 원
+CATEGORIES = ["숙박비", "식비", "교통비", "관광 및 입장료", "쇼핑", "기타"]
+DEFAULT_CATEGORY = "기타"
+SCHEMA_VERSION = 2
 
 
 class ValidationError(ValueError):
@@ -44,11 +48,12 @@ def parse_amount(text: str) -> int:
 
 @dataclass
 class Expense:
-    """지출 내역. (기능 2에서 입력 화면이 추가될 예정, 참가자 삭제 검증에 사용)"""
+    """지출 내역. participants가 비어 있으면 '참가자 전원이 균등 부담'을 뜻한다(기능 3에서 세분화)."""
     title: str
     amount: int
     payer: str
     participants: list[str] = field(default_factory=list)
+    category: str = DEFAULT_CATEGORY
 
     def involves(self, name: str) -> bool:
         return self.payer == name or name in self.participants
@@ -140,6 +145,62 @@ class Trip:
             e.participants = [new if p == old else p for p in e.participants]
         return new
 
+    # ---- 지출 ----
+    @staticmethod
+    def validate_expense_title(title: str) -> str:
+        title = _normalize(title)
+        if not title:
+            raise ValidationError("지출 항목 이름을 입력해 주세요.")
+        if len(title) > MAX_EXPENSE_TITLE_LEN:
+            raise ValidationError(f"지출 항목 이름은 {MAX_EXPENSE_TITLE_LEN}자 이하로 입력해 주세요.")
+        if _has_control_chars(title):
+            raise ValidationError("지출 항목 이름에 사용할 수 없는 문자가 있습니다.")
+        return title
+
+    @staticmethod
+    def validate_expense_amount(value: int | str) -> int:
+        amount = parse_amount(value) if isinstance(value, str) else value
+        if isinstance(amount, bool) or not isinstance(amount, int):
+            raise ValidationError("금액은 정수(원 단위)로 입력해 주세요.")
+        if amount < 1:
+            raise ValidationError("지출 금액은 1원 이상이어야 합니다.")
+        if amount > MAX_EXPENSE_AMOUNT:
+            raise ValidationError(f"지출 금액은 {MAX_EXPENSE_AMOUNT:,}원 이하로 입력해 주세요.")
+        return amount
+
+    def _check_expense_fields(self, title: str, amount: int | str, payer: str,
+                              category: str) -> tuple[str, int, str, str]:
+        title = self.validate_expense_title(title)
+        amount = self.validate_expense_amount(amount)
+        if payer not in self.participants:
+            raise ValidationError("결제한 사람을 참가자 목록에서 선택해 주세요.")
+        if category not in CATEGORIES:
+            raise ValidationError("지출 카테고리를 목록에서 선택해 주세요.")
+        return title, amount, payer, category
+
+    def add_expense(self, title: str, amount: int | str, payer: str, category: str) -> Expense:
+        title, amount, payer, category = self._check_expense_fields(title, amount, payer, category)
+        expense = Expense(title, amount, payer, [], category)
+        self.expenses.append(expense)
+        return expense
+
+    def update_expense(self, index: int, title: str, amount: int | str, payer: str, category: str) -> Expense:
+        if not 0 <= index < len(self.expenses):
+            raise ValidationError("수정할 지출 내역을 찾을 수 없습니다.")
+        title, amount, payer, category = self._check_expense_fields(title, amount, payer, category)
+        expense = self.expenses[index]
+        expense.title, expense.amount, expense.payer, expense.category = title, amount, payer, category
+        return expense
+
+    def remove_expense(self, index: int) -> Expense:
+        if not 0 <= index < len(self.expenses):
+            raise ValidationError("삭제할 지출 내역을 찾을 수 없습니다.")
+        return self.expenses.pop(index)
+
+    @property
+    def total_spent(self) -> int:
+        return sum(e.amount for e in self.expenses)
+
     def setup_problems(self) -> list[str]:
         """정산을 시작하기 전에 해결해야 할 설정 문제 목록."""
         problems = []
@@ -158,7 +219,7 @@ class Trip:
             "participants": list(self.participants),
             "expenses": [
                 {"title": e.title, "amount": e.amount, "payer": e.payer,
-                 "participants": list(e.participants)}
+                 "participants": list(e.participants), "category": e.category}
                 for e in self.expenses
             ],
         }
@@ -187,15 +248,17 @@ class Trip:
             for item in raw:
                 if not isinstance(item, dict):
                     raise ValidationError("지출 항목이 올바르지 않습니다.")
-                amount = item.get("amount")
-                if isinstance(amount, bool) or not isinstance(amount, int) or amount < 0:
-                    raise ValidationError("지출 금액이 올바르지 않습니다.")
+                amount = trip.validate_expense_amount(item.get("amount"))
+                title = trip.validate_expense_title(item.get("title", ""))
+                category = item.get("category", DEFAULT_CATEGORY)
+                if category not in CATEGORIES:
+                    raise ValidationError("지출 카테고리가 올바르지 않습니다.")
                 payer = item.get("payer")
                 members = item.get("participants", [])
                 if payer not in trip.participants or not isinstance(members, list) \
                         or any(m not in trip.participants for m in members):
                     raise ValidationError("지출 항목의 참가자가 올바르지 않습니다.")
-                trip.expenses.append(Expense(str(item.get("title", "")), amount, payer, list(members)))
+                trip.expenses.append(Expense(title, amount, payer, list(members), category))
             return trip
         except (TypeError, AttributeError) as exc:  # 예상치 못한 자료형
             raise ValidationError("저장 파일 내용이 올바르지 않습니다.") from exc
@@ -207,6 +270,13 @@ def demo_trip() -> Trip:
         name="제주도 3박4일 (예시)",
         budget=1_200_000,
         participants=["가상민수", "가상지은", "가상서준", "가상하윤"],
+        expenses=[
+            Expense("펜션 1박", 360_000, "가상민수", [], "숙박비"),
+            Expense("흑돼지 점심", 84_000, "가상지은", [], "식비"),
+            Expense("렌터카", 120_000, "가상서준", [], "교통비"),
+            Expense("성산일출봉 입장료", 52_000, "가상하윤", [], "관광 및 입장료"),
+            Expense("기념품", 38_500, "가상민수", [], "쇼핑"),
+        ],
     )
 
 
