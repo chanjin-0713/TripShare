@@ -20,6 +20,7 @@ from . import ui
 from .expense_page import ExpensePage
 from .result_page import ResultPage
 from .budget_page import BudgetPage
+from .stats_page import StatsPage
 from .budget import evaluate
 from .ui import (
     AVATAR_COLORS, C_ACCENT, C_ACCENT_SOFT, C_AMBER, C_AMBER_BG, C_BG, C_BORDER, C_GREEN, C_GREEN_BG,
@@ -92,10 +93,11 @@ class TripShareApp:
         self._build_info_card(main)
         self._build_participants(main)
         self.expense_page = ExpensePage(self.content, self)
+        self.stats_page = StatsPage(self.content, self)
         self.budget_page = BudgetPage(self.content, self)
         self.result_page = ResultPage(self.content, self)
         self.pages = {"settings": self.settings_page, "expenses": self.expense_page,
-                      "budget": self.budget_page, "result": self.result_page}
+                      "stats": self.stats_page, "budget": self.budget_page, "result": self.result_page}
         self.current_page = ""
         self.show_page("settings")
 
@@ -112,6 +114,8 @@ class TripShareApp:
                           font=(FONT, 10, "bold" if active else "normal"))
         if key == "expenses":
             self.expense_page.refresh()
+        elif key == "stats":
+            self.stats_page.refresh()
         elif key == "budget":
             self.budget_page.refresh()
         elif key == "result":
@@ -142,6 +146,7 @@ class TripShareApp:
 
         nav("settings", "여행 설정")
         nav("expenses", "지출 내역")
+        nav("stats", "지출 통계")
         nav("budget", "예산 관리")
         nav("result", "정산 결과")
 
@@ -228,6 +233,7 @@ class TripShareApp:
         if hasattr(self, "expense_page"):
             self.expense_page.refresh(reset_form=True)
             self.budget_page.refresh()
+            self.stats_page.refresh()
 
     def on_budget_changed(self) -> None:
         """예산 관리 화면에서 예산을 바꿨을 때, 입력 중인 다른 화면의 내용은 건드리지 않고 갱신."""
