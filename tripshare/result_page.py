@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import tkinter as tk
-from tkinter import ttk
+from pathlib import Path
+from tkinter import filedialog, messagebox, ttk
 
-from . import ui
+from . import exporter, ui
 from .models import ValidationError
 from .settlement import calculate
 from .ui import (
@@ -26,13 +27,21 @@ class ResultPage(tk.Frame):
     def _build_summary(self) -> None:
         box = card(self, padx=20, pady=14)
         box.pack(fill="x")
-        tk.Label(box, text="정산 결과", bg=C_BG, fg=C_TEXT, font=(FONT, 16, "bold")).pack(anchor="w")
+        top = tk.Frame(box, bg=C_BG)
+        top.pack(fill="x")
+        tk.Label(top, text="정산 결과", bg=C_BG, fg=C_TEXT, font=(FONT, 16, "bold")).pack(side="left")
+        ttk.Button(top, text="CSV로 저장", style="Soft.TButton",
+                   command=lambda: self.on_export("csv")).pack(side="right")
+        ttk.Button(top, text="TXT로 저장", style="Soft.TButton",
+                   command=lambda: self.on_export("txt")).pack(side="right", padx=(0, 8))
         self.total_label = tk.Label(box, bg=C_BG, fg=C_ACCENT, font=(FONT, 20, "bold"), anchor="w")
         self.total_label.pack(anchor="w", pady=(4, 2))
         self.chip_row = tk.Frame(box, bg=C_BG)
         self.chip_row.pack(anchor="w", pady=(2, 0))
         self.remainder_label = tk.Label(box, bg=C_BG, fg=C_MUTED, font=(FONT, 9), anchor="w")
         self.remainder_label.pack(anchor="w", pady=(6, 0))
+        self.save_label = tk.Label(box, bg=C_BG, fg=C_GREEN, font=(FONT, 9), anchor="w")
+        self.save_label.pack(anchor="w")
 
     def _make_tree(self, parent: tk.Misc, columns, height: int) -> ttk.Treeview:
         wrap = card(parent)
@@ -75,6 +84,33 @@ class ResultPage(tk.Frame):
             ("amount", "금액", 140, "e", False),
         ], height=4)
 
+    # ---------- 내보내기 ----------
+    def on_export(self, kind: str) -> None:
+        trip = self.app.trip
+        try:
+            exporter.build_txt(trip)  # 정산 가능한 상태인지 먼저 확인 (참가자 2명 이상)
+        except ValidationError as exc:
+            messagebox.showwarning("내보내기", f"{exc}\n'여행 설정'에서 참가자를 등록해 주세요.", parent=self.app.root)
+            return
+        label = {"txt": "TXT 파일", "csv": "CSV 파일 (Excel에서 열기)"}[kind]
+        path = filedialog.asksaveasfilename(
+            parent=self.app.root, title="정산 결과 저장", defaultextension=f".{kind}",
+            initialfile=exporter.default_filename(trip, kind),
+            filetypes=[(label, f"*.{kind}"), ("모든 파일", "*.*")])
+        if not path:  # 사용자가 취소
+            return
+        try:
+            (exporter.save_txt if kind == "txt" else exporter.save_csv)(trip, Path(path))
+        except OSError as exc:
+            messagebox.showerror(
+                "저장 실패",
+                "파일을 저장하지 못했습니다.\n"
+                "다른 프로그램(예: Excel)에서 같은 파일을 열어 둔 것은 아닌지 확인해 주세요.\n\n"
+                f"{exc}",
+                parent=self.app.root)
+            return
+        self.save_label.configure(text=f"✔ 저장했습니다: {path}")
+
     # ---------- 갱신 ----------
     def _show_notice(self, text: str | None) -> None:
         if text:
@@ -90,6 +126,7 @@ class ResultPage(tk.Frame):
         for w in self.chip_row.winfo_children():
             w.destroy()
         self.remainder_label.configure(text="")
+        self.save_label.configure(text="")
         self.transfer_count.configure(text="")
 
         try:
