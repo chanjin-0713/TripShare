@@ -18,7 +18,28 @@ from .models import (
 APP_TITLE = "TripShare - 여행 경비 자동 정산"
 PRIVACY_NOTE = "실제 이름·연락처 등 개인정보는 입력하지 마세요. 가상의 이름(예: 가상민수)을 사용하세요."
 
+DEFAULT_SIZE = (1050, 700)  # 기본 창 크기(픽셀, 100% 배율 기준)
+MIN_SIZE = (820, 560)       # 이보다 작아지면 내용은 스크롤로 사용
+PAGES = [("settings", "여행 설정"), ("expenses", "지출 내역"), ("stats", "지출 통계"),
+         ("budget", "예산 관리"), ("result", "정산 결과")]
+HELP_TEXT = """TripShare는 여행 경비를 입력하면 누가 누구에게 얼마를 보내야 하는지 자동으로 계산해 줍니다.
+
+1. 여행 설정: 여행 이름, 예산, 참가자(2~10명)를 등록합니다.
+2. 지출 내역: 지출 항목, 금액, 결제한 사람, 카테고리를 입력합니다.
+3. 정산 결과: 참가자별 부담 금액과 송금 목록을 확인하고 TXT/CSV로 저장합니다.
+4. 지출 통계, 예산 관리: 카테고리별 비중과 예산 사용률을 확인합니다.
+
+입력한 내용은 바로 자동 저장되며, 인터넷 연결이 필요 없습니다.
+실제 개인정보 대신 가상의 이름을 사용해 주세요."""
+ABOUT_TEXT = """TripShare - 여행 경비 자동 정산
+
+친구·가족과 함께한 여행의 공동 경비를 균등하게 나누어
+누가 누구에게 얼마를 송금하면 되는지 계산해 주는 프로그램입니다.
+
+모든 데이터는 이 컴퓨터에만 저장되며 외부로 전송되지 않습니다."""
+
 from . import ui
+from .ui import ScrollArea
 from .expense_page import ExpensePage
 from .result_page import ResultPage
 from .budget_page import BudgetPage
@@ -43,14 +64,61 @@ class TripShareApp:
         ui.set_scale(max(1.0, root.winfo_fpixels("1i") / 96))
         SCALE = ui.SCALE
         root.title(APP_TITLE)
-        root.geometry(f"{int(1000 * SCALE)}x{int(760 * SCALE)}")
-        root.minsize(int(900 * SCALE), int(700 * SCALE))
+        self._set_window_size()
         root.configure(bg=C_BG)
         self._setup_style()
+        self._build_menu()
         self._build_ui()
         self.refresh()
         root.protocol("WM_DELETE_WINDOW", self.on_close)
         self._report_startup()
+
+    # ---------- 창 크기 / 메뉴 ----------
+    def _set_window_size(self) -> None:
+        """기본 1050x700. 화면이 작으면 화면 안에 들어오도록 줄이고(내용은 스크롤), 최소 크기도 화면에 맞춘다."""
+        s = ui.SCALE
+        screen_w, screen_h = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+        max_w, max_h = screen_w - int(20 * s), screen_h - int(90 * s)  # 작업 표시줄/제목 표시줄 여유
+        width = min(int(DEFAULT_SIZE[0] * s), max_w)
+        height = min(int(DEFAULT_SIZE[1] * s), max_h)
+        x, y = max(0, (screen_w - width) // 2), max(0, (screen_h - height) // 3)
+        self.root.geometry(f"{width}x{height}+{x}+{y}")
+        self.root.minsize(min(int(MIN_SIZE[0] * s), width), min(int(MIN_SIZE[1] * s), height))
+
+    def _build_menu(self) -> None:
+        bar = tk.Menu(self.root)
+        file_menu = tk.Menu(bar, tearoff=False)
+        file_menu.add_command(label="새 여행 시작", command=self.on_new_trip)
+        file_menu.add_command(label="예시 데이터 불러오기", command=self.on_load_demo)
+        file_menu.add_separator()
+        file_menu.add_command(label="정산 결과를 TXT로 저장", command=lambda: self._export("txt"))
+        file_menu.add_command(label="정산 결과를 CSV로 저장", command=lambda: self._export("csv"))
+        file_menu.add_command(label="저장 폴더 열기", command=self.open_data_folder)
+        file_menu.add_separator()
+        file_menu.add_command(label="종료", command=self.on_close)
+        bar.add_cascade(label="파일", menu=file_menu)
+
+        go_menu = tk.Menu(bar, tearoff=False)
+        for i, (key, label) in enumerate(PAGES, 1):
+            go_menu.add_command(label=label, accelerator=f"Ctrl+{i}", command=lambda k=key: self.show_page(k))
+            self.root.bind_all(f"<Control-Key-{i}>", lambda _e, k=key: self.show_page(k))
+        bar.add_cascade(label="이동", menu=go_menu)
+
+        help_menu = tk.Menu(bar, tearoff=False)
+        help_menu.add_command(label="사용 방법", command=self.show_help)
+        help_menu.add_command(label="프로그램 정보", command=self.show_about)
+        bar.add_cascade(label="도움말", menu=help_menu)
+        self.root.configure(menu=bar)
+
+    def _export(self, kind: str) -> None:
+        self.show_page("result")
+        self.result_page.on_export(kind)
+
+    def show_help(self) -> None:
+        messagebox.showinfo("사용 방법", HELP_TEXT, parent=self.root)
+
+    def show_about(self) -> None:
+        messagebox.showinfo("프로그램 정보", ABOUT_TEXT, parent=self.root)
 
     # ---------- 저장/불러오기 ----------
     def _report_startup(self) -> None:
@@ -126,25 +194,31 @@ class TripShareApp:
         self._build_sidebar()
         self.content = tk.Frame(self.root, bg=C_BG)
         self.content.pack(side="left", fill="both", expand=True)
-        main = tk.Frame(self.content, bg=C_BG, padx=28, pady=22)
+        # 각 화면은 스크롤 영역 안에 둔다: 작은 화면에서도 모든 기능에 접근할 수 있다.
+        self.areas = {key: ScrollArea(self.content) for key, _label in PAGES}
+        main = tk.Frame(self.areas["settings"].inner, bg=C_BG, padx=28, pady=22)
+        main.pack(fill="both", expand=True)
         self.settings_page = main
         self._build_header(main)
         self._build_info_card(main)
         self._build_participants(main)
-        self.expense_page = ExpensePage(self.content, self)
-        self.stats_page = StatsPage(self.content, self)
-        self.budget_page = BudgetPage(self.content, self)
-        self.result_page = ResultPage(self.content, self)
-        self.pages = {"settings": self.settings_page, "expenses": self.expense_page,
-                      "stats": self.stats_page, "budget": self.budget_page, "result": self.result_page}
+        self.expense_page = ExpensePage(self.areas["expenses"].inner, self)
+        self.stats_page = StatsPage(self.areas["stats"].inner, self)
+        self.budget_page = BudgetPage(self.areas["budget"].inner, self)
+        self.result_page = ResultPage(self.areas["result"].inner, self)
+        for page in (self.expense_page, self.stats_page, self.budget_page, self.result_page):
+            page.pack(fill="both", expand=True)
+        self.pages = self.areas
         self.current_page = ""
         self.show_page("settings")
 
     def show_page(self, key: str) -> None:
-        if self.current_page:
-            self.pages[self.current_page].pack_forget()
-        self.current_page = key
-        self.pages[key].pack(fill="both", expand=True)
+        if self.current_page != key:
+            if self.current_page:
+                self.areas[self.current_page].pack_forget()
+            self.current_page = key
+            self.areas[key].pack(fill="both", expand=True)
+            self.areas[key].canvas.yview_moveto(0)
         for k, (row, lbl) in self.nav_rows.items():
             active = k == key
             bg = C_ACCENT_SOFT if active else C_SIDEBAR

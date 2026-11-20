@@ -16,7 +16,7 @@ from .ui import (
 LEVEL_STYLE = {
     UNSET: (C_AMBER, C_AMBER_BG, "#d1d5db"),
     OK: (C_GREEN, C_GREEN_BG, "#22c55e"),
-    CAUTION: (C_AMBER, C_AMBER_BG, "#f59e0b"),
+    CAUTION: (C_AMBER, C_AMBER_BG, "#f97316"),
     OVER: (C_RED, C_RED_BG, "#ef4444"),
 }
 LEVEL_ICON = {UNSET: "ℹ", OK: "✔", CAUTION: "⚠", OVER: "⛔"}
